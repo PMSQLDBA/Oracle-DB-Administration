@@ -1,0 +1,153 @@
+Oracle DB 19C Installation (27Aug2025)
+
+To install Oracle Database 19c **without using `yum`**, and instead using the **unzipped Oracle Database software** 
+(e.g., from a `.zip` file like `LINUX.X64_193000_db_home.zip`) that you've already extracted into the Oracle home directory (`dbhome_1`), 
+follow the step-by-step instructions below.
+
+## ✅ **Prerequisites (Assumptions)**
+
+* You're installing **Oracle Database 19c Enterprise Edition** on **Oracle Linux 7 or compatible**.
+* You've already downloaded and **unzipped the software into the Oracle Home directory**, e.g., `/u01/app/oracle/product/19.0.0/dbhome_1`.
+* OS user: `oracle`
+* Oracle base: `/u01/app/oracle`
+* Oracle home: `/u01/app/oracle/product/19.0.0/dbhome_1`
+
+*************************************************
+## 🔧 STEP 1: Create Required OS Groups and User
+*************************************************
+
+Run as **`root`**:
+
+groupadd oinstall
+groupadd dba
+groupadd oper
+useradd -g oinstall -G dba,oper oracle
+passwd oracle
+
+*************************************************
+## 🔧 STEP 2: Set Kernel Parameters and Limits
+*************************************************
+Create/edit the following config files:
+
+### `/etc/sysctl.d/99-oracle.conf`
+
+fs.file-max = 6815744
+kernel.sem = 250 32000 100 128
+kernel.shmmni = 4096
+kernel.shmall = 1073741824
+kernel.shmmax = 4398046511104
+net.core.rmem_default = 262144
+net.core.rmem_max = 4194304
+net.core.wmem_default = 262144
+net.core.wmem_max = 1048576
+fs.aio-max-nr = 1048576
+net.ipv4.ip_local_port_range = 9000 65500
+
+Apply it:
+
+sysctl --system
+
+### `/etc/security/limits.d/oracle.conf`
+
+oracle   soft   nofile    1024
+oracle   hard   nofile    65536
+oracle   soft   nproc     2047
+oracle   hard   nproc     16384
+oracle   soft   stack     10240
+oracle   hard   stack     32768
+oracle   hard   memlock   134217728
+oracle   soft   memlock   134217728
+
+*************************************************
+## 🔧 STEP 3: Set Environment for Oracle User
+*************************************************
+As `oracle`, update `~/.bash_profile`:
+
+export ORACLE_BASE=/u01/app/oracle
+export ORACLE_HOME=$ORACLE_BASE/product/19.0.0/dbhome_1
+export ORACLE_SID=ORCL
+export PATH=$ORACLE_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$ORACLE_HOME/lib
+umask 022
+
+Then:
+source ~/.bash_profile
+
+*************************************************
+## 📁 STEP 4: Unzip the Oracle Database Software
+*************************************************
+If not already done:
+
+mkdir -p /u01/app/oracle/product/19.0.0/dbhome_1
+chown -R oracle:oinstall /u01
+chmod -R 775 /u01
+
+# As oracle user
+unzip LINUX.X64_193000_db_home.zip -d /u01/app/oracle/product/19.0.0/dbhome_1
+
+> Make sure to unzip directly into the `$ORACLE_HOME` directory.
+
+*************************************************
+## 🛠 STEP 5: Run Oracle Installer in Silent Mode
+*************************************************
+As `oracle`, run:
+
+cd $ORACLE_HOME
+
+./runInstaller -silent -responseFile $ORACLE_HOME/install/response/db_install.rsp \
+oracle.install.option=INSTALL_DB_SWONLY \
+ORACLE_BASE=$ORACLE_BASE \
+ORACLE_HOME=$ORACLE_HOME \
+oracle.install.db.InstallEdition=EE \
+oracle.install.db.OSDBA_GROUP=dba \
+oracle.install.db.OSOPER_GROUP=oper \
+oracle.install.db.OSBACKUPDBA_GROUP=dba \
+oracle.install.db.OSDGDBA_GROUP=dba \
+oracle.install.db.OSKMDBA_GROUP=dba \
+oracle.install.db.OSRACDBA_GROUP=dba \
+DECLINE_SECURITY_UPDATES=true
+
+This installs the software **only**, without creating a database yet.
+
+*************************************************
+## ✅ STEP 6: Run Root Scripts
+*************************************************
+After installation completes, it will prompt you to run scripts as root:
+
+sh /u01/app/oraInventory/orainstRoot.sh
+sh /u01/app/oracle/product/19.0.0/dbhome_1/root.sh
+
+*************************************************
+## 🎯 STEP 7: Create a Database (Optional)
+*************************************************
+If you want to create a database, use **DBCA** in silent mode:
+
+dbca -silent -createDatabase \
+  -templateName General_Purpose.dbc \
+  -gdbname ORCL \
+  -sid ORCL \
+  -responseFile NO_VALUE \
+  -characterSet AL32UTF8 \
+  -memoryPercentage 40 \
+  -emConfiguration DBEXPRESS \
+  -emExpressPort 5500 \
+  -createAsContainerDatabase true \
+  -numberOfPDBs 1 \
+  -pdbName PDB1 \
+  -createListener LISTENER \
+  -dbsnmpPassword Oracle123 \
+  -sysPassword Oracle123 \
+  -systemPassword Oracle123 \
+  -pdbAdminPassword Oracle123 \
+  -databaseType MULTIPURPOSE
+
+*************************************************
+## ✅ STEP 8: Verify
+*************************************************
+Start SQL\*Plus and connect:
+
+sqlplus / as sysdba
+
+SQL> select name, open_mode from v$database;
+
+Done!
