@@ -1,0 +1,792 @@
+step-by-step simplified install guide for Oracle 19c on Linux (using preinstall RPM + silent mode), so you never have to fight the GUI installer again
+
+Perfect 👍 Let’s make Oracle 19c on Linux **simple and repeatable**. 
+
+**step-by-step guide** using the `oracle-database-preinstall-19c` RPM + silent installation.
+
+ 🚀 Simplified Oracle 19c Installation on Linux
+=============================
+ ✅ Step 1. OS Preparation
+=============================
+* Supported: Oracle Linux 7/8, RHEL 7/8 (x86\_64).
+* Make sure your OS is updated:
+
+sudo yum update -y
+=============================
+ ✅ Step 2. Install Oracle Preinstall Package
+=============================
+This package handles **users, groups, limits, kernel params, dependencies**:
+
+sudo yum install -y oracle-database-preinstall-19c
+
+It automatically:
+
+* Creates `oracle` user & `oinstall/dba` groups.
+* Configures `/etc/sysctl.conf` (kernel params).
+* Sets /etc/security/limits.conf.
+
+👉 This step eliminates **90% of manual headaches**.
+=============================
+ ✅ Step 3. Create Required Directories
+=============================
+sudo mkdir -p /u01/app/oracle/product/19.3.0/dbhome_1
+sudo chown -R oracle:oinstall /u01
+sudo chmod -R 775 /u01
+
+=============================
+ ✅ Step 4. Download Oracle 19c Software
+=============================
+* Get `LINUX.X64_193000_db_home.zip` from [Oracle eDelivery](https://www.oracle.com/database/technologies/oracle19c-linux-downloads.html).
+* Place it in `/u01/app/oracle/product/19.3.0/dbhome_1`.
+
+=============================
+ ✅ Step 5. Extract Software
+=============================
+Switch to `oracle` user:
+
+su - oracle
+cd /u01/app/oracle/product/19.3.0/dbhome_1
+unzip LINUX.X64_193000_db_home.zip
+
+=============================
+ ✅ Step 6. Silent Install (Software Only)
+=============================
+Run the installer in silent mode:
+
+./runInstaller -silent -ignorePrereq -waitforcompletion \
+  -responseFile /u01/app/oracle/product/19.3.0/dbhome_1/install/response/db_install.rsp \
+  oracle.install.option=INSTALL_DB_SWONLY \
+  UNIX_GROUP_NAME=oinstall \
+  INVENTORY_LOCATION=/u01/app/oraInventory \
+  ORACLE_HOME=/u01/app/oracle/product/19.3.0/dbhome_1 \
+  ORACLE_BASE=/u01/app/oracle \
+  oracle.install.db.InstallEdition=EE \
+  oracle.install.db.OSDBA_GROUP=dba \
+  oracle.install.db.OSOPER_GROUP=dba \
+  oracle.install.db.OSBACKUPDBA_GROUP=dba \
+  oracle.install.db.OSDGDBA_GROUP=dba \
+  oracle.install.db.OSKMDBA_GROUP=dba \
+  oracle.install.db.OSRACDBA_GROUP=dba \
+  DECLINE_SECURITY_UPDATES=true
+
+=============================
+ ✅ Step 7. Run Root Scripts
+=============================
+At the end, installer asks you (as root) to run:
+
+sudo /u01/app/oraInventory/orainstRoot.sh
+sudo /u01/app/oracle/product/19.3.0/dbhome_1/root.sh
+
+=============================
+ ✅ Step 8. Create a Database (Silent Mode)
+=============================
+Use `dbca`:
+
+dbca -silent -createDatabase \
+  -templateName General_Purpose.dbc \
+  -gdbName orcl \
+  -sid orcl \
+  -createAsContainerDatabase true \
+  -numberOfPDBs 1 \
+  -pdbName pdb1 \
+  -createListener LISTENER:1521 \
+  -databaseType MULTIPURPOSE \
+  -memoryMgmtType auto_sga \
+  -totalMemory 2048 \
+  -storageType FS \
+  -datafileDestination /u01/app/oracle/oradata \
+  -characterSet AL32UTF8 \
+  -emConfiguration NONE \
+  -sysPassword Welcome1 \
+  -systemPassword Welcome1 \
+  -pdbAdminPassword Welcome1
+
+=============================
+ ✅ Step 9. Set Environment Variables
+=============================
+Add to `~/._profile` for `oracle` user:
+
+export ORACLE_HOME=/u01/app/oracle/product/19.3.0/dbhome_1
+export ORACLE_BASE=/u01/app/oracle
+export ORACLE_SID=orcl
+export PATH=$ORACLE_HOME/bin:$PATH
+
+Reload:
+source ~/._profile
+
+=============================
+ ✅ Step 10. Verify Installation
+=============================
+sqlplus / as sysdba
+
+We should land in the Oracle SQL prompt.
+
+⚡ That’s it — no GUI, no messy prerequisites, just **10 clean steps**.
+
+
+
+=================================================================================================
+Let’s automate the whole thing with **Ansible** so Oracle 19c setup on Linux becomes one command.
+=================================================================================================
+This playbook will:
+
+* Install pre-requisites (`oracle-database-preinstall-19c`)
+* Create directories & users
+* Extract Oracle software
+* Install Oracle 19c silently
+* Run root scripts
+* Create a database silently
+
+ 🚀 Ansible Playbook: Oracle 19c Installation (Single Instance)
+
+yaml
+
+- name: Oracle 19c Installation on Linux
+  hosts: all
+  become: yes
+  vars:
+    oracle_user: oracle
+    oracle_group: oinstall
+    oracle_base: /u01/app/oracle
+    oracle_home: /u01/app/oracle/product/19.3.0/dbhome_1
+    inventory_loc: /u01/app/oraInventory
+    db_name: orcl
+    pdb_name: pdb1
+    oracle_sid: orcl
+    listener_port: 1521
+    sys_password: Welcome1
+    system_password: Welcome1
+    pdb_admin_password: Welcome1
+    oracle_zip: /tmp/LINUX.X64_193000_db_home.zip    <-- Put installer here
+
+  tasks:
+    - name: Ensure required packages are installed
+      yum:
+        name: oracle-database-preinstall-19c
+        state: present
+
+    - name: Create Oracle base directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ oracle_user }}"
+        group: "{{ oracle_group }}"
+        mode: '0775'
+      loop:
+        - "{{ oracle_base }}"
+        - "{{ oracle_home }}"
+        - "{{ inventory_loc }}"
+
+    - name: Unzip Oracle software
+      unarchive:
+        src: "{{ oracle_zip }}"
+        dest: "{{ oracle_home }}"
+        remote_src: yes
+      become_user: "{{ oracle_user }}"
+
+    - name: Install Oracle Software (silent)
+      command: >
+        {{ oracle_home }}/runInstaller -silent -ignorePrereq -waitforcompletion
+        -responseFile {{ oracle_home }}/install/response/db_install.rsp
+        oracle.install.option=INSTALL_DB_SWONLY
+        UNIX_GROUP_NAME={{ oracle_group }}
+        INVENTORY_LOCATION={{ inventory_loc }}
+        ORACLE_HOME={{ oracle_home }}
+        ORACLE_BASE={{ oracle_base }}
+        oracle.install.db.InstallEdition=EE
+        oracle.install.db.OSDBA_GROUP=dba
+        oracle.install.db.OSOPER_GROUP=dba
+        oracle.install.db.OSBACKUPDBA_GROUP=dba
+        oracle.install.db.OSDGDBA_GROUP=dba
+        oracle.install.db.OSKMDBA_GROUP=dba
+        oracle.install.db.OSRACDBA_GROUP=dba
+        DECLINE_SECURITY_UPDATES=true
+      become_user: "{{ oracle_user }}"
+      args:
+        chdir: "{{ oracle_home }}"
+
+    - name: Run orainstRoot.sh
+      command: "{{ inventory_loc }}/orainstRoot.sh"
+
+    - name: Run root.sh
+      command: "{{ oracle_home }}/root.sh"
+
+    - name: Create Oracle Database silently
+      command: >
+        {{ oracle_home }}/bin/dbca -silent -createDatabase
+        -templateName General_Purpose.dbc
+        -gdbName {{ db_name }}
+        -sid {{ oracle_sid }}
+        -createAsContainerDatabase true
+        -numberOfPDBs 1
+        -pdbName {{ pdb_name }}
+        -createListener LISTENER:{{ listener_port }}
+        -databaseType MULTIPURPOSE
+        -memoryMgmtType auto_sga
+        -totalMemory 2048
+        -storageType FS
+        -datafileDestination {{ oracle_base }}/oradata
+        -characterSet AL32UTF8
+        -emConfiguration NONE
+        -sysPassword {{ sys_password }}
+        -systemPassword {{ system_password }}
+        -pdbAdminPassword {{ pdb_admin_password }}
+      become_user: "{{ oracle_user }}"
+
+ 🔧 How to Use
+
+1. Save the playbook as `oracle19c.yml`.
+2. Place Oracle software zip (`LINUX.X64_193000_db_home.zip`) under `/tmp/` on target server.
+3. Run:
+
+ansible-playbook -i myhosts oracle19c.yml
+(where `myhosts` contains the target Linux server IP/hostname).
+
+👉 Once it runs, you’ll have Oracle 19c installed and a ready-to-use DB (`orcl` with PDB `pdb1`) in **one shot**.
+
+==================================================================================================================
+==================================================================================================================
+Let’s extend the playbook to include **post-install tasks** so that after the DB is created, 
+everything is ready-to-use, survives reboots, and the `oracle` user environment is preconfigured.
+==================================================================================================================
+ 🚀 Full Ansible Playbook: Oracle 19c + Post-Install Setup
+
+yaml
+
+- name: Oracle 19c Installation on Linux
+  hosts: all
+  become: yes
+  vars:
+    oracle_user: oracle
+    oracle_group: oinstall
+    oracle_base: /u01/app/oracle
+    oracle_home: /u01/app/oracle/product/19.3.0/dbhome_1
+    inventory_loc: /u01/app/oraInventory
+    db_name: orcl
+    pdb_name: pdb1
+    oracle_sid: orcl
+    listener_port: 1521
+    sys_password: Welcome1
+    system_password: Welcome1
+    pdb_admin_password: Welcome1
+    oracle_zip: /tmp/LINUX.X64_193000_db_home.zip    <-- Put installer here
+    total_memory_mb: 2048
+
+  tasks:
+    - name: Ensure required packages are installed
+      yum:
+        name: oracle-database-preinstall-19c
+        state: present
+
+    - name: Create Oracle base directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ oracle_user }}"
+        group: "{{ oracle_group }}"
+        mode: '0775'
+      loop:
+        - "{{ oracle_base }}"
+        - "{{ oracle_home }}"
+        - "{{ inventory_loc }}"
+
+    - name: Unzip Oracle software
+      unarchive:
+        src: "{{ oracle_zip }}"
+        dest: "{{ oracle_home }}"
+        remote_src: yes
+      become_user: "{{ oracle_user }}"
+
+    - name: Install Oracle Software (silent)
+      command: >
+        {{ oracle_home }}/runInstaller -silent -ignorePrereq -waitforcompletion
+        -responseFile {{ oracle_home }}/install/response/db_install.rsp
+        oracle.install.option=INSTALL_DB_SWONLY
+        UNIX_GROUP_NAME={{ oracle_group }}
+        INVENTORY_LOCATION={{ inventory_loc }}
+        ORACLE_HOME={{ oracle_home }}
+        ORACLE_BASE={{ oracle_base }}
+        oracle.install.db.InstallEdition=EE
+        oracle.install.db.OSDBA_GROUP=dba
+        oracle.install.db.OSOPER_GROUP=dba
+        oracle.install.db.OSBACKUPDBA_GROUP=dba
+        oracle.install.db.OSDGDBA_GROUP=dba
+        oracle.install.db.OSKMDBA_GROUP=dba
+        oracle.install.db.OSRACDBA_GROUP=dba
+        DECLINE_SECURITY_UPDATES=true
+      become_user: "{{ oracle_user }}"
+      args:
+        chdir: "{{ oracle_home }}"
+
+    - name: Run orainstRoot.sh
+      command: "{{ inventory_loc }}/orainstRoot.sh"
+
+    - name: Run root.sh
+      command: "{{ oracle_home }}/root.sh"
+
+    - name: Create Oracle Database silently
+      command: >
+        {{ oracle_home }}/bin/dbca -silent -createDatabase
+        -templateName General_Purpose.dbc
+        -gdbName {{ db_name }}
+        -sid {{ oracle_sid }}
+        -createAsContainerDatabase true
+        -numberOfPDBs 1
+        -pdbName {{ pdb_name }}
+        -createListener LISTENER:{{ listener_port }}
+        -databaseType MULTIPURPOSE
+        -memoryMgmtType auto_sga
+        -totalMemory {{ total_memory_mb }}
+        -storageType FS
+        -datafileDestination {{ oracle_base }}/oradata
+        -characterSet AL32UTF8
+        -emConfiguration NONE
+        -sysPassword {{ sys_password }}
+        -systemPassword {{ system_password }}
+        -pdbAdminPassword {{ pdb_admin_password }}
+      become_user: "{{ oracle_user }}"
+
+    - name: Configure Oracle environment for oracle user
+      blockinfile:
+        path: /home/{{ oracle_user }}/.bash_profile
+        owner: "{{ oracle_user }}"
+        group: "{{ oracle_group }}"
+        create: yes
+        block: |
+          export ORACLE_BASE={{ oracle_base }}
+          export ORACLE_HOME={{ oracle_home }}
+          export ORACLE_SID={{ oracle_sid }}
+          export PATH=$ORACLE_HOME/bin:$PATH
+          export LD_LIBRARY_PATH=$ORACLE_HOME/lib:/lib:/usr/lib
+          export CLASSPATH=$ORACLE_HOME/jlib:$ORACLE_HOME/rdbms/jlib
+
+    - name: Create systemd service for Oracle auto-start
+      copy:
+        dest: /etc/systemd/system/oracle.service
+        content: |
+          [Unit]
+          Description=Oracle Database Service
+          After=network.target
+
+          [Service]
+          Type=forking
+          User={{ oracle_user }}
+          ExecStart={{ oracle_home }}/bin/lsnrctl start
+          ExecStartPost={{ oracle_home }}/bin/dbstart {{ oracle_home }}
+          ExecStop={{ oracle_home }}/bin/dbshut {{ oracle_home }}
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Oracle service
+      systemd:
+        name: oracle
+        enabled: yes
+        state: started
+
+ 🔧 What’s New in This Version
+
+1. **Environment Variables** → Automatically added to `oracle` user’s `.bash_profile`.
+2. **Auto-Start Service** → A `systemd` service called `oracle.service` ensures:
+
+   * Listener starts on reboot
+   * Database auto-starts (`dbstart`)
+   * Graceful shutdown on stop
+
+🛠 How to Use
+
+1. Save as `oracle19c_full.yml`.
+2. Ensure Oracle installer zip is in `/tmp/`.
+3. Run:
+
+ansible-playbook -i myhosts oracle19c_full.yml
+
+After reboot, Oracle DB and listener will auto-start 🚀.
+
+=======================================================================================================================================
+Oracle 19c *always* needs a Release Update (RU) after base install, otherwise we’ll be running with bugs and security holes.
+=======================================================================================================================================
+
+We’ll extend the playbook to:
+
+1. Download (or place manually) the **RU patch zip**.
+2. Extract it.
+3. Apply it using `opatch apply` in silent mode.
+4. Update the Oracle inventory.
+5. Verify patch with `opatch lsinventory`.
+
+ 🚀 Ansible Playbook: Oracle 19c + Post-Install + RU Patch
+
+yaml
+
+- name: Oracle 19c Installation with RU Patch
+  hosts: all
+  become: yes
+  vars:
+    oracle_user: oracle
+    oracle_group: oinstall
+    oracle_base: /u01/app/oracle
+    oracle_home: /u01/app/oracle/product/19.3.0/dbhome_1
+    inventory_loc: /u01/app/oraInventory
+    db_name: orcl
+    pdb_name: pdb1
+    oracle_sid: orcl
+    listener_port: 1521
+    sys_password: Welcome1
+    system_password: Welcome1
+    pdb_admin_password: Welcome1
+    oracle_zip: /tmp/LINUX.X64_193000_db_home.zip
+    total_memory_mb: 2048
+    ru_patch_zip: /tmp/p35042068_190000_Linux-x86-64.zip    <-- Example RU Patch
+    ru_patch_dir: /u01/patches/ru_patch
+
+  tasks:
+    - name: Ensure required packages are installed
+      yum:
+        name: oracle-database-preinstall-19c
+        state: present
+
+    - name: Create Oracle base directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ oracle_user }}"
+        group: "{{ oracle_group }}"
+        mode: '0775'
+      loop:
+        - "{{ oracle_base }}"
+        - "{{ oracle_home }}"
+        - "{{ inventory_loc }}"
+        - "{{ ru_patch_dir }}"
+
+    - name: Unzip Oracle software
+      unarchive:
+        src: "{{ oracle_zip }}"
+        dest: "{{ oracle_home }}"
+        remote_src: yes
+      become_user: "{{ oracle_user }}"
+
+    - name: Install Oracle Software (silent)
+      command: >
+        {{ oracle_home }}/runInstaller -silent -ignorePrereq -waitforcompletion
+        -responseFile {{ oracle_home }}/install/response/db_install.rsp
+        oracle.install.option=INSTALL_DB_SWONLY
+        UNIX_GROUP_NAME={{ oracle_group }}
+        INVENTORY_LOCATION={{ inventory_loc }}
+        ORACLE_HOME={{ oracle_home }}
+        ORACLE_BASE={{ oracle_base }}
+        oracle.install.db.InstallEdition=EE
+        oracle.install.db.OSDBA_GROUP=dba
+        oracle.install.db.OSOPER_GROUP=dba
+        oracle.install.db.OSBACKUPDBA_GROUP=dba
+        oracle.install.db.OSDGDBA_GROUP=dba
+        oracle.install.db.OSKMDBA_GROUP=dba
+        oracle.install.db.OSRACDBA_GROUP=dba
+        DECLINE_SECURITY_UPDATES=true
+      become_user: "{{ oracle_user }}"
+      args:
+        chdir: "{{ oracle_home }}"
+
+    - name: Run orainstRoot.sh
+      command: "{{ inventory_loc }}/orainstRoot.sh"
+
+    - name: Run root.sh
+      command: "{{ oracle_home }}/root.sh"
+
+    - name: Unzip RU Patch
+      unarchive:
+        src: "{{ ru_patch_zip }}"
+        dest: "{{ ru_patch_dir }}"
+        remote_src: yes
+      become_user: "{{ oracle_user }}"
+
+    - name: Apply RU Patch with opatch
+      command: "{{ oracle_home }}/OPatch/opatch apply -silent"
+      args:
+        chdir: "{{ ru_patch_dir }}"
+      become_user: "{{ oracle_user }}"
+
+    - name: Run datapatch (to apply SQL changes inside DB)
+      command: "{{ oracle_home }}/OPatch/datapatch -verbose"
+      become_user: "{{ oracle_user }}"
+
+    - name: Verify patch application
+      command: "{{ oracle_home }}/OPatch/opatch lsinventory"
+      become_user: "{{ oracle_user }}"
+      register: opatch_output
+
+    - debug:
+        var: opatch_output.stdout_lines
+
+    - name: Create Oracle Database silently
+      command: >
+        {{ oracle_home }}/bin/dbca -silent -createDatabase
+        -templateName General_Purpose.dbc
+        -gdbName {{ db_name }}
+        -sid {{ oracle_sid }}
+        -createAsContainerDatabase true
+        -numberOfPDBs 1
+        -pdbName {{ pdb_name }}
+        -createListener LISTENER:{{ listener_port }}
+        -databaseType MULTIPURPOSE
+        -memoryMgmtType auto_sga
+        -totalMemory {{ total_memory_mb }}
+        -storageType FS
+        -datafileDestination {{ oracle_base }}/oradata
+        -characterSet AL32UTF8
+        -emConfiguration NONE
+        -sysPassword {{ sys_password }}
+        -systemPassword {{ system_password }}
+        -pdbAdminPassword {{ pdb_admin_password }}
+      become_user: "{{ oracle_user }}"
+
+    - name: Configure Oracle environment for oracle user
+      blockinfile:
+        path: /home/{{ oracle_user }}/.bash_profile
+        owner: "{{ oracle_user }}"
+        group: "{{ oracle_group }}"
+        create: yes
+        block: |
+          export ORACLE_BASE={{ oracle_base }}
+          export ORACLE_HOME={{ oracle_home }}
+          export ORACLE_SID={{ oracle_sid }}
+          export PATH=$ORACLE_HOME/bin:$PATH
+          export LD_LIBRARY_PATH=$ORACLE_HOME/lib:/lib:/usr/lib
+          export CLASSPATH=$ORACLE_HOME/jlib:$ORACLE_HOME/rdbms/jlib
+
+    - name: Create systemd service for Oracle auto-start
+      copy:
+        dest: /etc/systemd/system/oracle.service
+        content: |
+          [Unit]
+          Description=Oracle Database Service
+          After=network.target
+
+          [Service]
+          Type=forking
+          User={{ oracle_user }}
+          ExecStart={{ oracle_home }}/bin/lsnrctl start
+          ExecStartPost={{ oracle_home }}/bin/dbstart {{ oracle_home }}
+          ExecStop={{ oracle_home }}/bin/dbshut {{ oracle_home }}
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Oracle service
+      systemd:
+        name: oracle
+        enabled: yes
+        state: started
+
+ 🔧 Notes
+
+* Replace `ru_patch_zip` with your actual RU patch (e.g., `p35643107_190000_Linux-x86-64.zip`).
+* RU patches are cumulative → only apply the latest one.
+* `opatch apply` needs downtime if applied after DB creation, but here we patch **before creating DB**, which is best practice.
+* `datapatch` is required to apply SQL changes inside the database once it’s up.
+
+
+=======================================================================================================================================
+👌 A **rollback handler** is a life saver when patching Oracle, because if `opatch apply` fails mid-way, the Oracle Home may be left in an inconsistent state.
+We can extend the playbook with **Ansible handlers** and **pre/post backup of ORACLE\_HOME** so you can restore if things break.
+=======================================================================================================================================
+ 🚀 Ansible Playbook with RU Patch + Rollback Safety
+yaml
+
+- name: Oracle 19c Installation with RU Patch + Rollback
+  hosts: all
+  become: yes
+  vars:
+    oracle_user: oracle
+    oracle_group: oinstall
+    oracle_base: /u01/app/oracle
+    oracle_home: /u01/app/oracle/product/19.3.0/dbhome_1
+    inventory_loc: /u01/app/oraInventory
+    db_name: orcl
+    pdb_name: pdb1
+    oracle_sid: orcl
+    listener_port: 1521
+    sys_password: Welcome1
+    system_password: Welcome1
+    pdb_admin_password: Welcome1
+    oracle_zip: /tmp/LINUX.X64_193000_db_home.zip
+    total_memory_mb: 2048
+    ru_patch_zip: /tmp/p35643107_190000_Linux-x86-64.zip    latest RU patch zip
+    ru_patch_dir: /u01/patches/ru_patch
+    backup_dir: /u01/patches/backup_home
+
+  tasks:
+    - name: Ensure required packages are installed
+      yum:
+        name: oracle-database-preinstall-19c
+        state: present
+
+    - name: Create Oracle base directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ oracle_user }}"
+        group: "{{ oracle_group }}"
+        mode: '0775'
+      loop:
+        - "{{ oracle_base }}"
+        - "{{ oracle_home }}"
+        - "{{ inventory_loc }}"
+        - "{{ ru_patch_dir }}"
+        - "{{ backup_dir }}"
+
+    - name: Unzip Oracle software
+      unarchive:
+        src: "{{ oracle_zip }}"
+        dest: "{{ oracle_home }}"
+        remote_src: yes
+      become_user: "{{ oracle_user }}"
+
+    - name: Install Oracle Software (silent)
+      command: >
+        {{ oracle_home }}/runInstaller -silent -ignorePrereq -waitforcompletion
+        -responseFile {{ oracle_home }}/install/response/db_install.rsp
+        oracle.install.option=INSTALL_DB_SWONLY
+        UNIX_GROUP_NAME={{ oracle_group }}
+        INVENTORY_LOCATION={{ inventory_loc }}
+        ORACLE_HOME={{ oracle_home }}
+        ORACLE_BASE={{ oracle_base }}
+        oracle.install.db.InstallEdition=EE
+        oracle.install.db.OSDBA_GROUP=dba
+        oracle.install.db.OSOPER_GROUP=dba
+        oracle.install.db.OSBACKUPDBA_GROUP=dba
+        oracle.install.db.OSDGDBA_GROUP=dba
+        oracle.install.db.OSKMDBA_GROUP=dba
+        oracle.install.db.OSRACDBA_GROUP=dba
+        DECLINE_SECURITY_UPDATES=true
+      become_user: "{{ oracle_user }}"
+      args:
+        chdir: "{{ oracle_home }}"
+
+    - name: Run orainstRoot.sh
+      command: "{{ inventory_loc }}/orainstRoot.sh"
+
+    - name: Run root.sh
+      command: "{{ oracle_home }}/root.sh"
+
+    - name: Backup Oracle Home before patching
+      command: rsync -a {{ oracle_home }}/ {{ backup_dir }}/dbhome_1_backup_{{ ansible_date_time.iso8601 }}
+      when: ru_patch_zip is defined
+
+    - name: Unzip RU Patch
+      unarchive:
+        src: "{{ ru_patch_zip }}"
+        dest: "{{ ru_patch_dir }}"
+        remote_src: yes
+      become_user: "{{ oracle_user }}"
+      notify: apply_ru_patch    trigger handler
+
+    - name: Create Oracle Database silently
+      command: >
+        {{ oracle_home }}/bin/dbca -silent -createDatabase
+        -templateName General_Purpose.dbc
+        -gdbName {{ db_name }}
+        -sid {{ oracle_sid }}
+        -createAsContainerDatabase true
+        -numberOfPDBs 1
+        -pdbName {{ pdb_name }}
+        -createListener LISTENER:{{ listener_port }}
+        -databaseType MULTIPURPOSE
+        -memoryMgmtType auto_sga
+        -totalMemory {{ total_memory_mb }}
+        -storageType FS
+        -datafileDestination {{ oracle_base }}/oradata
+        -characterSet AL32UTF8
+        -emConfiguration NONE
+        -sysPassword {{ sys_password }}
+        -systemPassword {{ system_password }}
+        -pdbAdminPassword {{ pdb_admin_password }}
+      become_user: "{{ oracle_user }}"
+
+    - name: Configure Oracle environment for oracle user
+      blockinfile:
+        path: /home/{{ oracle_user }}/.bash_profile
+        owner: "{{ oracle_user }}"
+        group: "{{ oracle_group }}"
+        create: yes
+        block: |
+          export ORACLE_BASE={{ oracle_base }}
+          export ORACLE_HOME={{ oracle_home }}
+          export ORACLE_SID={{ oracle_sid }}
+          export PATH=$ORACLE_HOME/bin:$PATH
+          export LD_LIBRARY_PATH=$ORACLE_HOME/lib:/lib:/usr/lib
+          export CLASSPATH=$ORACLE_HOME/jlib:$ORACLE_HOME/rdbms/jlib
+
+    - name: Create systemd service for Oracle auto-start
+      copy:
+        dest: /etc/systemd/system/oracle.service
+        content: |
+          [Unit]
+          Description=Oracle Database Service
+          After=network.target
+
+          [Service]
+          Type=forking
+          User={{ oracle_user }}
+          ExecStart={{ oracle_home }}/bin/lsnrctl start
+          ExecStartPost={{ oracle_home }}/bin/dbstart {{ oracle_home }}
+          ExecStop={{ oracle_home }}/bin/dbshut {{ oracle_home }}
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Oracle service
+      systemd:
+        name: oracle
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: apply_ru_patch
+      block:
+        - name: Apply RU Patch with opatch
+          command: "{{ oracle_home }}/OPatch/opatch apply -silent"
+          args:
+            chdir: "{{ ru_patch_dir }}"
+          become_user: "{{ oracle_user }}"
+          register: patch_result
+          failed_when: patch_result.rc != 0
+          notify: rollback_patch
+
+        - name: Run datapatch
+          command: "{{ oracle_home }}/OPatch/datapatch -verbose"
+          become_user: "{{ oracle_user }}"
+          when: patch_result.rc == 0
+
+        - name: Verify patch application
+          command: "{{ oracle_home }}/OPatch/opatch lsinventory"
+          become_user: "{{ oracle_user }}"
+          when: patch_result.rc == 0
+
+    - name: rollback_patch
+      block:
+        - name: Rollback to backup Oracle Home
+          command: rsync -a --delete {{ backup_dir }}/dbhome_1_backup_* {{ oracle_home }}
+        - name: Restore inventory if needed
+          command: "{{ backup_dir }}/dbhome_1_backup_*/oui/bin/runInstaller -recover"
+          ignore_errors: yes
+
+ 🔧 How Rollback Works
+
+1. **Before patching** → ORACLE\_HOME is backed up with timestamp into `/u01/patches/backup_home`.
+2. **If `opatch apply` fails** → handler `rollback_patch` restores Oracle Home from backup.
+3. **Optional** → It also tries to recover inventory.
+
+✅ With this, your Ansible flow is now:
+
+* Install Oracle
+* Patch with RU
+* Rollback automatically if patching fails
+* Configure DB + auto-start
+=======================================================================================================================================
+=======================================================================================================================================
+
+
